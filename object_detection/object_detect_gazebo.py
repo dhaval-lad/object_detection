@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import String
 from sensor_msgs.msg import Image , LaserScan
-from sensor_msgs.msg import CameraInfo
 import cv2
 import numpy as np
 import torch
 from cv_bridge import CvBridge
-from tf2_ros import TransformListener, Buffer
-from geometry_msgs.msg import TransformStamped
 from objectdetection_msgs.msg import ObjectDetection, ObjectDetectionList
 
 # Load the YOLOv5 custom model with object class "Dustbin"
@@ -34,8 +30,6 @@ class MinimalPublisher(Node):
     def __init__(self):
         super().__init__('minimal_publisher')
         self.publisher_ = self.create_publisher(ObjectDetectionList, 'detections_publisher', 1)
-        self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
         self.bridge = CvBridge()
 
         # Subscriptions to Gazebo camera topics
@@ -50,9 +44,9 @@ class MinimalPublisher(Node):
             '/scan',
             self.scan_callback,
             1)
-        self.laser_angle_increment = 0.33 * np.pi / 180  # radians
-        self.latest_scan = np.array([np.float32(10)] * 810)    
-        self.laser_reads_front = np.array([np.float32(10)] * 240) 
+        self.laser_angle_increment = 1.0 * np.pi / 180  # radians
+        self.latest_scan = np.array([np.float32(10)] * 270)    
+        self.laser_reads_front = np.array([np.float32(10)] * 80) 
 
         self.color_image = None
 
@@ -67,7 +61,7 @@ class MinimalPublisher(Node):
         self.laser_angle_increment = scan_msg.angle_increment
         self.latest_scan = np.array(scan_msg.ranges)
         self.latest_scan[self.latest_scan == np.inf] = np.float32(10)
-        self.laser_reads_front = np.array(self.latest_scan[150:390]) 
+        self.laser_reads_front = np.array(self.latest_scan[50:130]) 
 
     def timer_callback(self):
         if self.color_image is None:
@@ -90,8 +84,7 @@ class MinimalPublisher(Node):
         # Draw the ROI box on the original image for visualization
         cv2.rectangle(self.color_image, (x1_roi, y1_roi), (x2_roi, y2_roi), (0, 255, 0), 2)
 
-
-        # Crop the color and depth images to the ROI
+        # Crop the color images accprding to the ROI
         cropped_color_image = self.color_image[y1_roi:y2_roi, x1_roi:x2_roi]
 
         # Detect objects using YOLOv5 on the cropped image
@@ -115,24 +108,29 @@ class MinimalPublisher(Node):
                     y2_full = y2 + y1_roi
 
                     # Calculate the distance to the object
-                    x_centers = (x1_full + x2_full) / 2
-                    y_center = (y1_full + y2_full) / 2
-                    x_center = 320 - x_centers
+                    x_centers = (x1_full + x2_full) / 2         # center of bounding box in horizontal
+                    y_center = (y1_full + y2_full) / 2          # center of bounding box in vertical
+                    x_center = 320 - x_centers                  # center with respect to horizontal FoV of camera
                     pixel_size_meters = 0.00155
                     x_center = x_center * pixel_size_meters
                     
                     # Calculate the distance to the object
-                    center = -int(x_centers*0.375)
+                    # camera cover 80° FoV over Lidar range. which mean 80 laser read in 640 pixels. 
+                    center = -int(x_centers*0.125)              # 80/640=0.125 (laser read/horizontal pixel) 
                     # print("Person Center: ", center)
                     index_for_min = np.argmin(self.laser_reads_front[center-5:center+5])
                     # print("index person: ",index_for_min)
-                    object_angle = ((240+center-5+index_for_min)+150)/3   ### ((240+center+5-(10-index_for_min))+150)/3
-                    print("Person Angle: ",object_angle)
+
+                    # calculate angle of the object detected from right hand side of the robot. 
+                    object_angle = ((80.0+center-5.0+index_for_min)+50.0)    # here 50° is added because Lidar ranges starts from right side and camera FOV range from 50° to 130°. 
+                                                                                            # and 80° is foe complete FoV of camera.   
+                    # print("Person Angle: ",object_angle)
+
+                    # extract depth value from the Lidar ranges with the help of 'center'
                     object_depth = float(min(self.laser_reads_front[center-5:center+5]))
                     # print("Person depth: ", object_depth)
 
-                    # label = f"({float(x_center):.3f}): {object_depth:.2f}m"
-                    label = f"{object_depth:.2f}m({object_angle:.2f})"
+                    label = f"({model_v5s.names[int(class_id)]},{object_depth:.2f}m,{object_angle:.2f})"
 
                     # Create ObjectDetection message
                     detection_msg = ObjectDetection()
@@ -173,22 +171,27 @@ class MinimalPublisher(Node):
                     y2_full = y2 + y1_roi
 
                     # Calculate the distance to the object
-                    x_centers = (x1_full + x2_full) / 2
-                    y_center = (y1_full + y2_full) / 2
-                    x_center = 320 - x_centers
+                    x_centers = (x1_full + x2_full) / 2         # center of bounding box in horizontal
+                    y_center = (y1_full + y2_full) / 2          # center of bounding box in vertical
+                    x_center = 320 - x_centers                  # center with respect to horizontal FoV of camera
                     pixel_size_meters = 0.00155
                     x_center = x_center * pixel_size_meters
                    
                     # Calculate the distance to the object
-                    center = -int(x_centers*0.375)
-                    print("Dustbin Center: ", center)
-                    object_angle = ((240+center) + 150)/3
-                    print("Dustbin Angle: ", object_angle)
-                    object_depth = float(self.laser_reads_front[center])
+                    # camera cover 80° FoV over Lidar range. which mean 80 laser read in 640 pixels. 
+                    center = -int(x_centers*0.125)              # 80/640=0.125 (laser read/horizontal pixel) 
+                    # print("Dustbin Center: ", center)
+
+                    # calculate angle of the object detected from right hand side of the robot. 
+                    object_angle = ((80.0+center) + 50.0)   # here 50° is added because Lidar ranges starts from right side and camera FOV range from 50° to 130°. 
+                                                                                            # and 80° is foe complete FoV of camera.   
+                    # print("Dustbin Angle: ", object_angle)
+
+                    # extract depth value from the Lidar ranges with the help of 'center'
+                    object_depth = float(self.laser_reads_front[center])  
                     # print("Dustbin depth: ", object_depth)
 
-                    # label = f"({float(x_center):.3f}): {object_depth:.2f}m"
-                    label = f"{object_depth:.2f}m({object_angle:.2f})"
+                    label = f"({model_custom.names[int(class_id)]},{object_depth:.2f}m,{object_angle:.2f})"
 
                     # Create ObjectDetection message
                     detection_msg = ObjectDetection()
