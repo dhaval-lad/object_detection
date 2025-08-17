@@ -4,7 +4,7 @@
 The `object_detection` package is responsible for processing camera and LiDAR data to detect object 'class', 'depth' and 'respective angle'. This package uses Camera-LiDAR fusion for to get respective information in simulation. And in real Intel RealSense D435i these informations are directly calculated from camera messages. 
 
 ## Dependencies
-- ROS 2
+- [ROS 2 Humble](https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debs.html)
 - [objectdetection_msgs](https://github.com/dhaval-lad/objectdetection_msgs.git) : Custom msgs for object detection, depth and angle.
 - Intel RealSense D435i.
 - A robot with Depth camera and 2D LiDAR (270° FoV). Recomended: [GrassHopper Gazebo](https://github.com/dhaval-lad/grasshopper_gazebo.git)
